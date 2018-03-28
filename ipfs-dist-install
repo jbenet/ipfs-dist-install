@@ -128,7 +128,7 @@ if [ "$version" = "" ]; then
 fi
 
 # are we printing versions only?
-if [ $listversions -eq 1 ]; then
+if [ $listversions ]; then
   cat "$versionsFile"
   cd "$cwd"
   exit 0
