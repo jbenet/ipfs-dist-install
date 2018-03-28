@@ -1,0 +1,183 @@
+#!/bin/sh
+
+distinstall="ipfs-dist-install"
+default_installpath="/usr/local/bin"
+repourl="https://github.com/jbenet/$distinstall"
+disturl="https://dist.ipfs.io"
+
+USAGE="$0 <program> [<version>] [<install-path>]"
+
+usage() {
+  echo "USAGE"
+  echo "\t$USAGE"
+  echo "\tinstalls a given program binary at a local install path"
+  echo "\t"
+  echo "\t<version>         should be a version as used in https://dist.ipfs.io"
+  echo "\t                  if empty, use latest available semver release"
+  echo "\t<install-path>    should be a local file system path"
+  echo "\t                  if empty, use $default_installpath"
+  echo ""
+  echo "OPTIONS"
+  echo "\t-h, --help        print usage information"
+  echo "\t-v, --verbose     print execution log"
+  echo "\t-l, --list        list available versions for <program>"
+  echo ""
+  echo "EXAMPLES"
+  echo "\t# install latest ipfs-cluster-service release"
+  echo "\t> ipfs-dist-install ipfs-cluster-service"
+  echo "\tinstalled /usr/local/bin/ipfs-cluster-service (v0.3.4)"
+  echo "\t"
+  echo "\t# show all versions for gx"
+  echo "\t> ipfs-dist-install gx --list"
+  echo "\tv0.6.0"
+  echo "\tv0.7.0"
+  echo "\tv0.8.0"
+  echo "\tv0.8.0"
+  echo "\tv0.9.0"
+  echo "\tv0.10.0"
+  echo "\tv0.11.0"
+  echo "\tv0.11.0"
+  echo "\tv0.12.0"
+  echo "\tv0.12.1"
+  echo "\t"
+  echo "\t# install latest rc for gx-go ipfs-cluster-ctl"
+  echo "\t> ipfs-dist-install ipfs-cluster-ctl v0.3.5-rc1"
+  echo "\tinstalled /usr/local/bin/ipfs-cluster-ctl (v0.3.5-rc1)"
+  echo ""
+  echo "CONTRIBUTE"
+  echo "\tPlease file issues, pull-requests, and more at $repourl"
+  exit 0
+}
+
+die() {
+  echo >&2 "error: $@"
+  exit 1
+}
+
+log() {
+  if [ $verbose ]; then
+    echo >&2 "$@"
+  fi
+}
+
+assert_has() {
+  if [ -z $(which "$1") ]; then
+     die "please install $1"
+  fi
+}
+
+assert_has mv
+assert_has tar
+assert_has curl
+assert_has grep
+assert_has mkdir
+
+# get user options
+if [ $# -eq 0 ]; then
+  usage
+fi
+
+while [ $# -gt 0 ]; do
+  # get options
+  arg="$1"
+  shift
+
+  case "$arg" in
+  -h|--help) usage ;;
+  -v|--verbose) verbose=1 ;;
+  -l|--list) listversions=1 ;;
+  --*)
+    die "unrecognised option: '$arg'\n$USAGE" ;;
+  *)
+    if [ "$program" = "" ]; then
+      program="$arg"
+    elif [ "$version" = "" ]; then
+      version="$arg"
+    elif [ "$dstpath" = "" ]; then
+      dstpath="$arg"
+    else
+      die "too many arguments\n$USAGE"
+    fi
+    ;;
+  esac
+done
+
+# if no program specified, error out.
+if [ "$program" = "" ]; then
+  die "no program specified"
+fi
+
+# move to temporary directory for downloads
+cwd=$(pwd)
+tmpdir="/tmp/ipfs-dist-install/${program}"
+mkdir -p "$tmpdir"
+cd "$tmpdir"
+
+# set version
+versionsUrl="$disturl/$program/versions"
+versionsFile="./versions"
+curl -s -o "$versionsFile" "$versionsUrl"
+if [ $? -ne 0 ]; then
+  die "failed to fetch versions at $versionsUrl"
+fi
+if [ "$version" = "" ]; then
+  release_semver_regexp='^v[0-9]*\.[0-9]*\.[0-9]*$'
+  latest_version=$(grep "$release_semver_regexp" "$versionsFile" | tail -n1)
+  log "latest version of $program: $latest_version"
+  version="$latest_version"
+fi
+
+# are we printing versions only?
+if [ $listversions -eq 1 ]; then
+  cat "$versionsFile"
+  cd "$cwd"
+  exit 0
+fi
+
+# set default install path
+if [ "$dstpath" = "" ]; then
+  dstpath="$default_installpath/$program"
+fi
+
+# figure out GOPLATFORM
+# log "figuring out go platform"
+case "$(uname -s)" in
+  Darwin) GOOS=darwin; archiveExt=".tar.gz" ;;
+  FreeBSD) GOOS=freebsd; archiveExt=".tar.gz" ;;
+  OpenBSD) GOOS=openbsd; archiveExt=".tar.gz" ;;
+  Linux) GOOS=linux; archiveExt=".tar.gz" ;;
+  CYGWIN*|MINGW32*|MSYS*) GOOS=windows; archiveExt=".zip" ;;
+  *) die "error: unknown os\nplease add it to: $repourl" ;;
+esac
+
+case $(uname -m) in
+  amd64) GOARCH=amd64 ;;
+  x86_64) GOARCH=amd64 ;;
+  i686) GOARCH=386 ;;
+  i686) GOARCH=386 ;;
+  *) die "error: unknown arch\nplease add it to: $repourl" ;;
+esac
+
+
+# figure out URL
+archiveFilename="${program}_${version}_${GOOS}-${GOARCH}${archiveExt}"
+URL="$disturl/$program/$version/$archiveFilename"
+
+# move to version dir
+mkdir -p "$tmpdir/$version"
+cd "$tmpdir/$version"
+log "installing $program $version"
+
+# download url
+log "downloading $URL"
+curl -s -o "$archiveFilename" "$URL" 2>&1 >/dev/null || die "failed to download $URL"
+
+# untar
+log "expanding $archiveFilename"
+tar xzf "$archiveFilename" 2>&1 >/dev/null || die "failed to expand $archiveFilename"
+
+# installing
+log "installing to $dstpath"
+mv "$program/$program" "$dstpath" 2>&1 >/dev/null || die "failed to move $program/$program to $dstpath"
+echo "installed $dstpath ($version)"
+cd "$cwd"
